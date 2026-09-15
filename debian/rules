@@ -1,0 +1,61 @@
+#!/usr/bin/make -f
+DEB_HOST_ARCH ?= $(shell dpkg-architecture -qDEB_HOST_ARCH)
+TREE_SITTER_VERSION := $(shell dpkg-parsechangelog -S Version | sed 's/[-~].*//')
+
+# The Rust toolchain is installed with rustup inside the build tree: tree-sitter
+# needs Rust >= 1.90, newer than the rustc of most suites we target.
+export RUSTUP_HOME := $(CURDIR)/debian/rustup
+export CARGO_HOME := $(CURDIR)/debian/cargo
+export PATH := $(CARGO_HOME)/bin:$(PATH)
+
+%:
+	dh $@
+
+override_dh_auto_configure:
+
+# The orig tarball is upstream's v$(TREE_SITTER_VERSION) source tag, compiled
+# natively with cargo. Like upstream's release binaries, amd64/arm64 are built
+# with the "wasm" feature and embed the web playground; the playground's
+# web-tree-sitter.{js,wasm} are compiled with emscripten upstream, so the
+# prebuilt copies published on the same release are used. armhf/i386 are built
+# with default features only.
+override_dh_auto_build:
+	@arch="$(DEB_HOST_ARCH)"; \
+	case "$$arch" in \
+		amd64|arm64) features="wasm" ;; \
+		armhf|i386)  features="" ;; \
+		*) echo "Unsupported architecture: $$arch"; exit 1 ;; \
+	esac; \
+	set -e; \
+	curl -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path --profile minimal --default-toolchain stable; \
+	if [ "$$features" = "wasm" ]; then \
+		echo "Downloading web-tree-sitter.tar.gz for $(TREE_SITTER_VERSION)..."; \
+		curl -sSfL "https://github.com/tree-sitter/tree-sitter/releases/download/v$(TREE_SITTER_VERSION)/web-tree-sitter.tar.gz" \
+			| tar -xz -C lib/binding_web ./web-tree-sitter.js ./web-tree-sitter.wasm; \
+	fi; \
+	cargo build --release --locked -p tree-sitter-cli --features "$$features"; \
+	mkdir -p completions; \
+	target/release/tree-sitter complete --shell bash    > completions/tree-sitter.bash; \
+	target/release/tree-sitter complete --shell zsh     > completions/_tree-sitter; \
+	target/release/tree-sitter complete --shell fish    > completions/tree-sitter.fish; \
+	target/release/tree-sitter complete --shell nushell > completions/tree-sitter.nu
+
+# The package is named "tree-sitter-cli" but upstream's binary is
+# "tree-sitter"; shell completions are therefore installed under the binary name.
+override_dh_auto_install:
+	install -D -m 755 target/release/tree-sitter debian/tree-sitter-cli/usr/bin/tree-sitter
+	install -D -m 644 completions/tree-sitter.bash debian/tree-sitter-cli/usr/share/bash-completion/completions/tree-sitter
+	install -D -m 644 completions/tree-sitter.fish debian/tree-sitter-cli/usr/share/fish/vendor_completions.d/tree-sitter.fish
+	install -D -m 644 completions/_tree-sitter debian/tree-sitter-cli/usr/share/zsh/vendor-completions/_tree-sitter
+	install -D -m 644 completions/tree-sitter.nu debian/tree-sitter-cli/usr/share/nushell/vendor/autoload/tree-sitter.nu
+
+override_dh_auto_test:
+
+override_dh_auto_clean:
+	rm -rf target completions debian/rustup debian/cargo
+	rm -f lib/binding_web/web-tree-sitter.js lib/binding_web/web-tree-sitter.wasm
+
+# Upstream ships its release binaries unstripped; so does this package.
+override_dh_strip:
+
+override_dh_dwz:

@@ -1,0 +1,108 @@
+name: Build tree-sitter-cli for Debian
+
+on:
+  workflow_dispatch:
+    inputs:
+      tree_sitter_cli_version:
+        description: The version of tree-sitter-cli to build.
+        type: string
+        required: true
+      build_version:
+        description: The build version.
+        type: string
+        required: true
+      architecture:
+        description: Architecture to build (amd64, arm64, armhf, i386, or 'all' for all architectures)
+        type: choice
+        default: 'all'
+        options:
+          - 'all'
+          - 'amd64'
+          - 'arm64'
+          - 'armhf'
+          - 'i386'
+
+permissions:
+  contents: write
+
+jobs:
+  build-tree-sitter-cli:
+    name: Build (${{ matrix.arch }})
+    runs-on: ubuntu-latest
+    # The binary is compiled from source for every architecture (see
+    # Dockerfile.build), so architectures are built in parallel jobs.
+    strategy:
+      fail-fast: true
+      matrix:
+        arch: ${{ fromJSON(inputs.architecture == 'all' && '["amd64","arm64","armhf","i386"]' || format('["{0}"]', inputs.architecture)) }}
+    steps:
+      - name: Checkout tree-sitter-cli-debian
+        uses: actions/checkout@v4
+
+      - name: Validate upstream license permits paid distribution
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: ./validate_license.sh ${{ inputs.tree_sitter_cli_version }}
+
+      - name: Build tree-sitter-cli
+        run: |
+          ./build_debian.sh ${{ inputs.tree_sitter_cli_version }} ${{ inputs.build_version }} ${{ matrix.arch }}
+          ./build_ubuntu.sh ${{ inputs.tree_sitter_cli_version }} ${{ inputs.build_version }} ${{ matrix.arch }}
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: artifact-${{ matrix.arch }}
+          path: tree-sitter-cli_*.deb
+
+  build-src:
+    name: Build Source Packages
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout tree-sitter-cli-debian
+        uses: actions/checkout@v4
+
+      - name: Install dpkg-dev
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends dpkg-dev devscripts wget ca-certificates
+
+      - name: Build source packages
+        run: ./build_src.sh ${{ inputs.tree_sitter_cli_version }} ${{ inputs.build_version }}
+
+      - name: Upload Source Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: source-artifact
+          path: |
+            tree-sitter-cli_*.dsc
+            tree-sitter-cli_*.orig.tar.gz
+            tree-sitter-cli_*.debian.tar.xz
+
+  release-tree-sitter-cli:
+    name: Release tree-sitter-cli for Debian
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    needs: [build-tree-sitter-cli, build-src]
+    steps:
+      - name: Download All Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: artifact-*
+          merge-multiple: true
+
+      - name: Download Source Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: source-artifact
+
+      - name: Publish Release
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: false
+          files: |
+            tree-sitter-cli_*.deb
+            tree-sitter-cli_*.dsc
+            tree-sitter-cli_*.orig.tar.gz
+            tree-sitter-cli_*.debian.tar.xz
+          name: ${{ inputs.tree_sitter_cli_version }}+${{ inputs.build_version }}
+          tag_name: ${{ inputs.tree_sitter_cli_version }}+${{ inputs.build_version }}
+          fail_on_unmatched_files: true

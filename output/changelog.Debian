@@ -1,0 +1,31 @@
+tree-sitter-cli (FULL_VERSION) DIST; urgency=low
+
+  ## v0.27.0 (2026-08-30)
+
+  CLI highlights (see the upstream release for the complete list):
+
+  - `tree-sitter build` gains a `--verbose` flag, canonicalizes the `--output`
+    path, supports concurrent builds of the same grammar in different
+    locations, and warns when `nm` cannot verify the parser's symbols.
+  - `tree-sitter test --update` rewrites all corpus files, and the test
+    summary output is restored.
+  - `tree-sitter init -u` reports what it updates and fixes several update
+    issues; the `Package.swift` scanner detection works when the grammar is
+    used as a dependency.
+  - `tree-sitter generate` no longer requires `tree-sitter.json` for ABI 15,
+    errors when a supertype is defined as a terminal, and is faster.
+  - CST output fixes: trailing whitespace after multiline text nodes and
+    `--no-ranges` discrepancies.
+  - `tree-sitter highlight` sets the language in the current directory for
+    every usage, and gains UTF-16 support.
+  - Wasm: updated wasi-sdk and binaryen, cached toolchains are invalidated on
+    version mismatch, several `realloc` fixes and stdlib additions.
+  - Query fixes for captures in alternations with quantifiers.
+  - Rust edition 2024, MSRV 1.90.
+
+  Packaging note: the binary is compiled from the upstream v0.27.0 source tag
+  on Ubuntu 22.04 (glibc 2.35), because upstream's prebuilt Linux binaries
+  require glibc 2.39 and do not run on Debian 12 or Ubuntu 22.04.
+
+  The complete upstream release notes live at
+  https://github.com/tree-sitter/tree-sitter/releases/tag/v0.27.0

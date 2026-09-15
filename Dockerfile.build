@@ -1,0 +1,86 @@
+# Compiles the tree-sitter CLI from source for one Debian architecture.
+#
+# Upstream's release binaries are built on ubuntu-24.04 and therefore require
+# GLIBC_2.39, which bookworm (2.36) and jammy (2.35) do not have. Nothing in
+# tree-sitter needs 2.39: the only 2.39 symbols (pidfd_spawnp, pidfd_getpid) are
+# weak references from Rust's std that fall back at runtime. Building on jammy,
+# the oldest glibc of every suite we target, yields one binary per architecture
+# that runs on all of them. amd64 is compiled natively, the rest are
+# cross-compiled with Ubuntu's cross toolchains (glibc 2.35 as well).
+FROM ubuntu:jammy
+
+ARG tree_sitter_cli_VERSION
+ARG ARCH
+ARG RUST_TOOLCHAIN=stable
+# Highest glibc symbol version the binary may require (jammy's).
+ARG MAX_GLIBC=2.35
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Mirror upstream's release matrix: amd64/arm64 are built with the "wasm"
+# feature (wasmtime, for `tree-sitter build --wasm` / `parse --wasm`) and embed
+# the web playground; armhf/i386 are built with default features only.
+RUN set -eu; \
+    case "$ARCH" in \
+        amd64) echo "x86_64-unknown-linux-gnu        -                       wasm" ;; \
+        arm64) echo "aarch64-unknown-linux-gnu       aarch64-linux-gnu       wasm" ;; \
+        armhf) echo "armv7-unknown-linux-gnueabihf   arm-linux-gnueabihf     -" ;; \
+        i386)  echo "i686-unknown-linux-gnu          i686-linux-gnu          -" ;; \
+        *) echo "Unsupported architecture: $ARCH" >&2; exit 1 ;; \
+    esac > /target.txt
+
+# The cross compilers only Recommend their libc headers, so they are listed
+# explicitly. When cross-compiling, rquickjs-sys (the built-in QuickJS runtime)
+# generates its bindings with bindgen, which needs libclang. wasmtime's C API
+# crate runs cmake to install its headers.
+RUN set -eu; \
+    read -r target cross features < /target.txt; \
+    pkgs="build-essential curl ca-certificates"; \
+    if [ "$cross" != "-" ]; then pkgs="$pkgs gcc-$cross libc6-dev-$ARCH-cross libclang-dev"; fi; \
+    if [ "$features" = "wasm" ]; then pkgs="$pkgs cmake"; fi; \
+    apt-get update -qq; \
+    apt-get install -y -qq --no-install-recommends $pkgs; \
+    rm -rf /var/lib/apt/lists/*
+
+ENV RUSTUP_HOME=/opt/rustup CARGO_HOME=/opt/cargo PATH=/opt/cargo/bin:$PATH
+RUN set -eu; \
+    read -r target cross features < /target.txt; \
+    curl -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path --profile minimal \
+        --default-toolchain "$RUST_TOOLCHAIN" --target "$target"
+
+WORKDIR /src
+RUN set -eu; \
+    curl -sSfL "https://github.com/tree-sitter/tree-sitter/archive/refs/tags/v${tree_sitter_cli_VERSION}.tar.gz" \
+        | tar -xz --strip-components=1
+
+# The playground is only embedded when lib/binding_web/web-tree-sitter.{js,wasm}
+# exist at build time. Upstream compiles them with emscripten; the same files
+# are published prebuilt as web-tree-sitter.tar.gz on the matching release.
+RUN set -eu; \
+    read -r target cross features < /target.txt; \
+    if [ "$features" = "wasm" ]; then \
+        curl -sSfL "https://github.com/tree-sitter/tree-sitter/releases/download/v${tree_sitter_cli_VERSION}/web-tree-sitter.tar.gz" \
+            | tar -xz -C lib/binding_web ./web-tree-sitter.js ./web-tree-sitter.wasm; \
+    fi
+
+RUN set -eu; \
+    read -r target cross features < /target.txt; \
+    if [ "$cross" != "-" ]; then \
+        t=$(echo "$target" | tr 'a-z-' 'A-Z_'); \
+        export "CARGO_TARGET_${t}_LINKER=${cross}-gcc"; \
+        export "CC_$(echo "$target" | tr '-' '_')=${cross}-gcc"; \
+        export "AR_$(echo "$target" | tr '-' '_')=${cross}-ar"; \
+    fi; \
+    [ "$features" = "-" ] && features=""; \
+    cargo build --release --locked -p tree-sitter-cli --target "$target" --features "$features"; \
+    mkdir -p /out; \
+    cp "target/$target/release/tree-sitter" /out/tree-sitter
+
+# Fail loudly if the binary picked up a glibc symbol newer than jammy's.
+RUN set -eu; \
+    need=$(readelf -V /out/tree-sitter | grep -oE 'GLIBC_[0-9]+\.[0-9]+' | sed 's/GLIBC_//' | sort -Vu | tail -1); \
+    echo "Highest GLIBC symbol version required: $need"; \
+    if [ "$(printf '%s\n%s\n' "$need" "$MAX_GLIBC" | sort -V | tail -1)" != "$MAX_GLIBC" ]; then \
+        echo "Binary requires GLIBC_$need, newer than $MAX_GLIBC" >&2; exit 1; \
+    fi; \
+    echo "$need" > /out/glibc-version

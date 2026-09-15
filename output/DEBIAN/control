@@ -1,0 +1,25 @@
+Source: tree-sitter-cli
+Section: devel
+Priority: optional
+Maintainer: Dario Griffo <dariogriffo@gmail.com>
+Homepage: https://tree-sitter.github.io/tree-sitter/
+Package: tree-sitter-cli
+Version: tree_sitter_cli_VERSION-BUILD_VERSION~DIST
+Architecture: SUPPORTED_ARCHITECTURES
+PACKAGE_DEPENDS
+Description: command-line tool for developing Tree-sitter parsers
+ Tree-sitter is a parser generator tool and an incremental parsing library. It
+ can build a concrete syntax tree for a source file and efficiently update the
+ syntax tree as the source file is edited.
+ .
+ This package contains the Tree-sitter CLI, which is used to generate, build,
+ test and use Tree-sitter grammars: it can scaffold a grammar repository,
+ generate parsers, run corpus tests, parse, query, highlight and tag files,
+ and serve a web playground.
+ .
+ The command provided by this package is "tree-sitter".
+ .
+ Some commands need tools that are not installed automatically: building or
+ testing a parser needs a C compiler (e.g. gcc), and "tree-sitter generate"
+ runs grammar.js with node unless "--js-runtime native" selects the built-in
+ QuickJS runtime.

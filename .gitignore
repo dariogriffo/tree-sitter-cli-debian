@@ -1,0 +1,18 @@
+# .deb Packages
+*.deb
+
+# Source packages
+*.dsc
+*.orig.tar.gz
+*.debian.tar.xz
+
+# Compiled / downloaded upstream artifacts
+tree-sitter-linux-*/
+tree-sitter-cli-[0-9]*/
+tree-sitter-[0-9]*/
+/completions/
+/usr/
+/DEBIAN/
+
+.idea/*
+.DS_Store
